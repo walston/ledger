@@ -1,0 +1,12 @@
+{
+  "name": "ledger",
+  "version": 2,
+  "env": {
+    "PGUSER": "docker",
+    "PGHOST": "localhost",
+    "PGPASSWORD": "2gq3tRLXa!hik3C4W9",
+    "PGDATABASE": "ledger",
+    "PGPORT": "5432"
+  },
+  "routes": [{ "src": "/account", "dest": "api/account.ts" }]
+}
