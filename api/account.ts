@@ -8,6 +8,8 @@ import { manglePassword, newSalt } from "./_util/password";
 
 /** Known Errors */
 const DUPLICATE_ENTRY = Error("DUPLICATE ENTRY ON INSERT");
+const DATABASE_DISCONNECT = Error("UNABLE TO CONNECT TO DATABASE");
+const UKNOWN_ERROR = Error("UKNOWN ERROR");
 
 /**
  * POST /account
@@ -68,21 +70,23 @@ app.use(router.routes()).use(router.allowedMethods());
 
 export default app;
 
-function createAccount(accountName: string, password: string): Promise<string> {
-  accountName = String(accountName).toLocaleLowerCase();
+function createAccount(username: string, password: string): Promise<string> {
+  username = String(username).toLocaleLowerCase();
 
   const salt = newSalt();
   const hashedPassword = manglePassword(password, salt);
 
-  return query(sql`INSERT INTO "accounts"
-    ("id", "username", "hashed_password", "salt")
-    VALUES
-    (gen_random_uuid(), ${accountName}, ${hashedPassword}, ${salt})
-    RETURNING "accounts"."id";
+  return query<{ id: string }>(sql`
+    INSERT INTO
+    "accounts" ("id"             , "username"  , "hashed_password", "salt" )
+    VALUES     (gen_random_uuid(), ${username} , ${hashedPassword}, ${salt})
+    RETURNING "accounts"."id"
+    ;
   `)
     .then(rows => rows[0].id)
     .catch(err => {
       if (err.detail && err.detail.includes("already exists"))
         throw DUPLICATE_ENTRY;
+      else throw UKNOWN_ERROR;
     });
 }
