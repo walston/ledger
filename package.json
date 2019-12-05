@@ -33,7 +33,10 @@
     "@types/node": "12.12.14",
     "@types/pg": "^7.11.2",
     "@types/react": "16.9.13",
-    "@types/react-dom": "16.9.4"
+    "@types/react-dom": "16.9.4",
+    "ava": "^2.4.0",
+    "cypress": "^3.7.0",
+    "ts-node": "^8.5.4"
   },
   "browserslist": {
     "production": [

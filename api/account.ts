@@ -5,11 +5,14 @@ import sql from "sql-template-strings";
 
 import { query } from "./_util/db-driver";
 import { manglePassword, newSalt } from "./_util/password";
+import errorHandler from "./_util/error-handler";
 
 /** Known Errors */
 const DUPLICATE_ENTRY = Error("DUPLICATE ENTRY ON INSERT");
 const DATABASE_DISCONNECT = Error("UNABLE TO CONNECT TO DATABASE");
 const UKNOWN_ERROR = Error("UKNOWN ERROR");
+
+type AccountCreation = { id: string; token: string; expiry: Date };
 
 /**
  * POST /account
@@ -37,21 +40,22 @@ const app = new Koa();
 const router = new Router();
 router
   .use(bodyparser())
+  .use(errorHandler())
   .post("Create Account", "/account", async (ctx, next) => {
     const { account_name, password } = ctx.request.body;
 
     try {
       ctx.status = 200;
-      ctx.body = { uuid: await createAccount(account_name, password) };
+      const account = await createAccount(account_name, password);
+      ctx.cookies.set("token", account.token, { expires: account.expiry });
+      ctx.body = { id: account.id };
       return next();
     } catch (e) {
       if (e === DUPLICATE_ENTRY) {
-        ctx.status = 409;
-        return next();
+        return ctx.throw(409);
       } else {
         console.error(e);
-        ctx.status = 500;
-        return next();
+        return ctx.throw();
       }
     }
   })
@@ -70,13 +74,16 @@ app.use(router.routes()).use(router.allowedMethods());
 
 export default app;
 
-function createAccount(username: string, password: string): Promise<string> {
+async function createAccount(
+  username: string,
+  password: string
+): Promise<AccountCreation> {
   username = String(username).toLocaleLowerCase();
 
   const salt = newSalt();
   const hashedPassword = manglePassword(password, salt);
 
-  return query<{ id: string }>(sql`
+  const id: string = await query<{ id: string }>(sql`
     INSERT INTO
     "accounts" ("id"             , "username"  , "hashed_password", "salt" )
     VALUES     (gen_random_uuid(), ${username} , ${hashedPassword}, ${salt})
@@ -89,4 +96,15 @@ function createAccount(username: string, password: string): Promise<string> {
         throw DUPLICATE_ENTRY;
       else throw UKNOWN_ERROR;
     });
+
+  return await query<{ token: string; expiry: string }>(sql`
+    INSERT INTO "authentication_tokens" as
+    "tokens" (id   , fingerprint, token   , expiry)
+    VALUES   (${id}, '123456'   , '123456', current_timestamp + interval '1 hour')
+    RETURNING "tokens"."token", "tokens"."expiry";
+  `).then(rows => ({
+    id,
+    token: rows[0].token,
+    expiry: new Date(rows[0].expiry)
+  }));
 }
