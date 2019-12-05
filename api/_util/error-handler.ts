@@ -1,6 +1,7 @@
 import { Middleware } from "koa";
 
-export default function errorHandler(config: object = {}): Middleware {
+type ErrorNumConfig = { [key: number]: string };
+export default function errorHandler(config: ErrorNumConfig = {}): Middleware {
   return async (ctx, next) => {
     try {
       await next();

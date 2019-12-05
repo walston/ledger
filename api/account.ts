@@ -1,11 +1,13 @@
 import Koa from "koa";
 import Router from "koa-router";
 import bodyparser from "koa-bodyparser";
+import crypto from "crypto";
 import sql from "sql-template-strings";
 
 import { query } from "./_util/db-driver";
 import { manglePassword, newSalt } from "./_util/password";
 import errorHandler from "./_util/error-handler";
+import validateFingerprint from "./_util/validate-fingerprint";
 
 /** Known Errors */
 const DUPLICATE_ENTRY = Error("DUPLICATE ENTRY ON INSERT");
@@ -41,12 +43,17 @@ const router = new Router();
 router
   .use(bodyparser())
   .use(errorHandler())
+  .use(validateFingerprint)
   .post("Create Account", "/account", async (ctx, next) => {
     const { account_name, password } = ctx.request.body;
 
     try {
       ctx.status = 200;
-      const account = await createAccount(account_name, password);
+      const account = await createAccount(
+        account_name,
+        password,
+        ctx.request.header["x-fingerprint"]
+      );
       ctx.cookies.set("token", account.token, { expires: account.expiry });
       ctx.body = { id: account.id };
       return next();
@@ -76,7 +83,8 @@ export default app;
 
 async function createAccount(
   username: string,
-  password: string
+  password: string,
+  fingerprint: string
 ): Promise<AccountCreation> {
   username = String(username).toLocaleLowerCase();
 
@@ -97,10 +105,11 @@ async function createAccount(
       else throw UKNOWN_ERROR;
     });
 
+  const token = crypto.randomBytes(192).toString("base64"); // 256 random chars
   return await query<{ token: string; expiry: string }>(sql`
     INSERT INTO "authentication_tokens" as
-    "tokens" (id   , fingerprint, token   , expiry)
-    VALUES   (${id}, '123456'   , '123456', current_timestamp + interval '1 hour')
+    "tokens" ( "id",  "fingerprint",  "token", "expiry"                             )
+    VALUES   (${id}, ${fingerprint}, ${token}, current_timestamp + interval '1 hour')
     RETURNING "tokens"."token", "tokens"."expiry";
   `).then(rows => ({
     id,
