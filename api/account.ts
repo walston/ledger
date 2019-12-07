@@ -11,52 +11,27 @@ import validateFingerprint from "./_util/validate-fingerprint";
 
 /** Known Errors */
 const DUPLICATE_ENTRY = Error("DUPLICATE ENTRY ON INSERT");
+const INVALID_CREDENTIALS = Error("INVALID CREDENTIALS");
 const DATABASE_DISCONNECT = Error("UNABLE TO CONNECT TO DATABASE");
 const UKNOWN_ERROR = Error("UKNOWN ERROR");
 
-type AccountCreation = { id: string; token: string; expiry: Date };
-
-/**
- * POST /account
- * X-FINGERPRINT='string'
- * {
- *   'account_name': string;
- *   'password': string;
- * }
- *
- * salt = crypto().salt()
- * hash(password, salt)
- * psql('insert into
- *    accounts (username, password, salt)
- *    values ($1, $2, $3)
- *    returning (id);
- * ', [account_name, password, salt])
- * psql('insert into
- *    authentication_tokens (id, fingerprint, token, expiry)
- *    values ($1, $2, $3, now() + 30min)
- *    returning (token, expiry);
- * ', [account_id, x_fingerprint, token])
- */
+type Credentials = { id: string; token: string; expiry: Date };
 
 const app = new Koa();
-const router = new Router();
-router
+const publicRouter = new Router();
+publicRouter
   .use(bodyparser())
   .use(errorHandler())
-  .use(validateFingerprint)
+  .use(validateFingerprint())
   .post("Create Account", "/account", async (ctx, next) => {
-    const { account_name, password } = ctx.request.body;
+    const { account_name: name, password } = ctx.request.body;
+    const { fingerprint } = ctx.state;
 
     try {
-      ctx.status = 200;
-      const account = await createAccount(
-        account_name,
-        password,
-        ctx.request.header["x-fingerprint"]
-      );
+      const account = await createAccount(name, password, fingerprint);
       ctx.cookies.set("token", account.token, { expires: account.expiry });
       ctx.body = { id: account.id };
-      return next();
+      return await next();
     } catch (e) {
       if (e === DUPLICATE_ENTRY) {
         return ctx.throw(409);
@@ -66,18 +41,26 @@ router
       }
     }
   })
-  .put("Update Password", "/account", async (ctx, next) => {
-    ctx.status = 430;
-    ctx.body = "Operation Not Yet Supported";
-    return next();
-  })
-  .delete("Remove Account", "/account", async (ctx, next) => {
-    ctx.status = 430;
-    ctx.body = "Operation Not Yet Supported";
-    return next();
+  .post("Login", "/account/login", async (ctx, next) => {
+    const { account_name: name, password } = ctx.request.body;
+    const { fingerprint } = ctx.state;
+
+    try {
+      const account = await accountLogin(name, password, fingerprint);
+      ctx.cookies.set("token", account.token, { expires: account.expiry });
+      ctx.body = { id: account.id };
+      return await next();
+    } catch (e) {
+      if (e === INVALID_CREDENTIALS) {
+        return ctx.throw(401);
+      } else {
+        console.error(e);
+        return ctx.throw();
+      }
+    }
   });
 
-app.use(router.routes()).use(router.allowedMethods());
+app.use(publicRouter.routes()).use(publicRouter.allowedMethods());
 
 export default app;
 
@@ -85,8 +68,8 @@ async function createAccount(
   username: string,
   password: string,
   fingerprint: string
-): Promise<AccountCreation> {
-  username = String(username).toLocaleLowerCase();
+): Promise<Credentials> {
+  username = String(username).toLowerCase();
 
   const salt = newSalt();
   const hashedPassword = manglePassword(password, salt);
@@ -113,6 +96,51 @@ async function createAccount(
     RETURNING "tokens"."token", "tokens"."expiry";
   `).then(rows => ({
     id,
+    token: rows[0].token,
+    expiry: new Date(rows[0].expiry)
+  }));
+}
+
+type AccountRow = {
+  id: string;
+  username: string;
+  hashed_password: string;
+  salt: string;
+};
+async function accountLogin(
+  username: string,
+  password: string,
+  fingerprint: string
+): Promise<Credentials> {
+  username = String(username).toLowerCase();
+
+  const account = await query<AccountRow>(sql`
+    SELECT *
+    FROM "accounts" as "a"
+    WHERE "username" = ${username};
+  `).then(rows => {
+    if (rows.length === 0) throw INVALID_CREDENTIALS;
+    return rows[0];
+  });
+
+  /** @note remove old logins with same fingerprint */
+  await query(sql`
+    DELETE FROM "authentication_tokens"
+    WHERE "fingerprint" = ${fingerprint}
+    AND "id" = ${account.id};
+  `);
+
+  const hashedPassword = manglePassword(password, account.salt);
+  if (account.hashed_password !== hashedPassword) throw INVALID_CREDENTIALS;
+
+  const token = crypto.randomBytes(192).toString("base64"); // 256 random chars
+  return await query<{ token: string; expiry: string }>(sql`
+    INSERT INTO "authentication_tokens" as
+    "tokens" ( "id"        ,  "fingerprint",  "token", "expiry"                             )
+    VALUES   (${account.id}, ${fingerprint}, ${token}, current_timestamp + interval '1 hour')
+    RETURNING "tokens"."token", "tokens"."expiry";
+  `).then(rows => ({
+    id: account.id,
     token: rows[0].token,
     expiry: new Date(rows[0].expiry)
   }));
