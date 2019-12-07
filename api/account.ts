@@ -21,43 +21,23 @@ const app = new Koa();
 const publicRouter = new Router();
 publicRouter
   .use(bodyparser())
-  .use(errorHandler())
+  .use(errorHandler([INVALID_CREDENTIALS, 401], [DUPLICATE_ENTRY, 409]))
   .use(validateFingerprint())
   .post("Create Account", "/account", async (ctx, next) => {
     const { account_name: name, password } = ctx.request.body;
     const { fingerprint } = ctx.state;
-
-    try {
-      const account = await createAccount(name, password, fingerprint);
-      ctx.cookies.set("token", account.token, { expires: account.expiry });
-      ctx.body = { id: account.id };
-      return await next();
-    } catch (e) {
-      if (e === DUPLICATE_ENTRY) {
-        return ctx.throw(409);
-      } else {
-        console.error(e);
-        return ctx.throw();
-      }
-    }
+    const account = await createAccount(name, password, fingerprint);
+    ctx.cookies.set("token", account.token, { expires: account.expiry });
+    ctx.body = { id: account.id };
+    return await next();
   })
   .post("Login", "/account/login", async (ctx, next) => {
     const { account_name: name, password } = ctx.request.body;
     const { fingerprint } = ctx.state;
-
-    try {
-      const account = await accountLogin(name, password, fingerprint);
-      ctx.cookies.set("token", account.token, { expires: account.expiry });
-      ctx.body = { id: account.id };
-      return await next();
-    } catch (e) {
-      if (e === INVALID_CREDENTIALS) {
-        return ctx.throw(401);
-      } else {
-        console.error(e);
-        return ctx.throw();
-      }
-    }
+    const account = await accountLogin(name, password, fingerprint);
+    ctx.cookies.set("token", account.token, { expires: account.expiry });
+    ctx.body = { id: account.id };
+    return await next();
   });
 
 app.use(publicRouter.routes()).use(publicRouter.allowedMethods());
