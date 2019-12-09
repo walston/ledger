@@ -8,5 +8,5 @@
     "PGDATABASE": "ledger",
     "PGPORT": "5432"
   },
-  "routes": [{ "src": "/account(/log(in|out))?$", "dest": "api/account.ts" }]
+  "routes": [{ "src": "/account.*", "dest": "api/account.ts" }]
 }
